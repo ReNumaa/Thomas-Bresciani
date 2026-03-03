@@ -1,6 +1,6 @@
 # TB Training — Diario di Sviluppo & Roadmap
 
-> Documento aggiornato al 03/03/2026 (sessione 7)
+> Documento aggiornato al 03/03/2026 (sessione 9)
 > Prototipo: sistema di prenotazione palestra, frontend-only con localStorage
 > Supabase CLI installato, schema SQL definito, accesso dati centralizzato
 > Supabase cloud attivo (tabelle create), Google OAuth funzionante, numeri normalizzati E.164
@@ -746,6 +746,42 @@ Libreria Canvas custom, nessuna dipendenza esterna.
 
 ---
 
+### 4.23 UI hero e nome PWA (mar 2026)
+
+**Titolo hero in maiuscolo (`index.html`):**
+- `<h1 class="hero-name">` aggiornato da `Thomas Bresciani` a `THOMAS BRESCIANI`
+
+**Rinomina app PWA da "Palestra" a "Gym":**
+- `manifest.json`: `name` e `short_name` → `"Gym"`
+- `index.html`: meta `apple-mobile-web-app-title` → `"Gym"`
+
+---
+
+
+### 4.24 Refactor phone, fix bug e warning certificato (mar 2026)
+
+**Aggiornamenti warning certificato medico (`prenotazioni.html` + `js/admin.js`):**
+- Tre stati distinti con testi ufficiali:
+  - Non impostato: `🏥 Imposta scadenza Cert. Medico (qui)` — "(qui)" apre il modale modifica profilo
+  - Scaduto: `🏥 Cert. Medico scaduto il DD/MM/YYYY` — nessun link
+  - Imminente (≤ 30 giorni): `⏳ Mancano X giorni alla scadenza del tuo Cert. Medico (porta a Thomas quello nuovo)` — nessun link
+- Soglia avviso imminente portata da 15 a 30 giorni
+- Admin — card partecipante: badge `🏥 Imposta scadenza certificato medico` se non impostato (oltre al già esistente badge scaduto)
+- Admin — scheda cliente: badge rosso se non impostato, giallo se ≤30gg, verde se valido
+
+**Unificazione `normalizePhone` (`js/data.js` + `prenotazioni.html`):**
+- Rimosso `static _normalizePhone()` da `CreditStorage` e `ManualDebtStorage` (erano duplicati con logica diversa)
+- Rimossa funzione locale `normPhone()` da `prenotazioni.html`
+- Tutti i confronti numeri WhatsApp usano ora `normalizePhone()` di `auth.js` (E.164 `+39XXXXXXXXXX`)
+- Zero impatto visivo; elimina rischio di mismatch durante la migrazione dati a Supabase
+- Rimane solo `_normPhone` locale in `getAllClients()` (scopo diverso: dedup visivo, ultimi 10 cifre)
+
+**Fix bug concreti:**
+- `booking.js` + `calendar.js`: parsing orario `split(' - ')` con fallback sicuro — nessun crash se formato orario anomalo
+- `booking.js`: eliminato XSS in `showConfirmation()` — `JSON.stringify(booking)` dentro `onclick` sostituito con variabile globale `_confirmedBooking`
+- `auth.js`: `u.email?.toLowerCase()` con optional chaining — nessun crash se un record utente è privo di email
+
+---
 ### 4.12 Notifiche (pianificate, non ancora implementate)
 
 - Il form di prenotazione simula l'invio di un messaggio WhatsApp (solo `console.log`)
@@ -865,6 +901,8 @@ Libreria Canvas custom, nessuna dipendenza esterna.
 | Service worker: bump a palestra-v4 | Fatto ✅ |
 | Tab giorno rosso in Gestione Orari se slot prenotato senza cliente | Funzionante ✅ |
 | Fix logo dark mode: color-scheme light su tutti i punti (navbar, sidebar, login, chi-sono) | Funzionante ✅ |
+| Hero name in maiuscolo (THOMAS BRESCIANI) | Fatto ✅ |
+| PWA rinominata da "Palestra" a "Gym" (manifest.json + meta tag Apple) | Fatto ✅ |
 
 ---
 
@@ -913,9 +951,9 @@ Libreria Canvas custom, nessuna dipendenza esterna.
   - ~~Abilitare GitHub Pages~~ ✅
   - Sito live: https://renumaa.github.io/Palestra
 
-- [ ] **Normalizzare numeri WhatsApp nel form di prenotazione** (booking.js)
-  - `normalizePhone()` è già disponibile in `auth.js`
-  - Da applicare al campo WhatsApp in `handleBookingSubmit` per coerenza con il resto
+- [x] **Normalizzare numeri WhatsApp — unificazione `normalizePhone`** ✅ (mar 2026)
+  - `_normalizePhone` rimosso da `CreditStorage` e `ManualDebtStorage`
+  - Tutti i confronti usano `normalizePhone()` di `auth.js` (E.164)
 
 - [ ] **Upload foto certificato medico** (da fare insieme alla migrazione Supabase)
   - Aggiungere input file nel modal "Modifica profilo" di `prenotazioni.html`
@@ -992,83 +1030,63 @@ Libreria Canvas custom, nessuna dipendenza esterna.
 
 ## 7. Roadmap verso la produzione
 
-### Fase 1 — Deploy base (stimato: 1–2 settimane di lavoro)
-
-```
-Obiettivo: il sito funziona online con dati reali
-
-1. Creare progetto Supabase
-   └── Definire schema DB
-   └── Configurare RLS (Row Level Security)
-
-2. Migrare frontend a Supabase
-   └── Riscrivere data.js
-   └── Gestire async/await nell'UI
-   └── Testare prenotazioni reali
-
-3. Autenticazione admin
-   └── Supabase Auth oppure password in .env
-   └── Rimuovere admin123 hardcoded
-
-4. Deploy GitHub Pages
-   └── Creare repo
-   └── Abilitare Pages
-   └── Test completo online
-```
-
-**Risultato:** il sistema è online, i clienti possono prenotare, l'admin può gestire tutto.
+> Ordine concordato nella sessione 9 — da eseguire in sequenza
 
 ---
 
-### Fase 2 — Notifiche email (stimato: 2–3 giorni di lavoro)
+### Fase 0 — Testing e riverifica (ora) ⬅️ siamo qui
 
-```
-Obiettivo: email automatiche per conferme e promemoria
-
-1. Registrarsi su Brevo (gratis)
-   └── Ottenere API key
-
-2. Email di conferma
-   └── Triggera subito dopo la prenotazione
-   └── Riepilogo slot, data, ora, tipo lezione
-
-3. Email promemoria
-   └── Supabase Edge Function (cron) o script esterno
-   └── Gira ogni sera alle 20:00
-   └── Trova tutte le prenotazioni del giorno dopo
-   └── Invia email a ogni cliente
-```
-
-**Risultato:** i clienti ricevono conferma e promemoria automatici, zero lavoro manuale per il gestore.
+- [ ] Testare tutte le logiche in uso: prenotazioni, crediti, annullamenti, transazioni
+- [ ] Verificare la coerenza dei dati in localStorage su scenari edge (annullamento con credito, doppio pagamento, ecc.)
+- [ ] Risolvere eventuali bug emersi dal testing
 
 ---
 
-### Fase 3 — Ottimizzazioni (stimato: ongoing)
+### Fase 1 — Dominio + infrastruttura email
 
-```
-Obiettivo: migliorare esperienza utente e gestione
-
-- Pagina conferma prenotazione dedicata
-- Link "aggiungi a Google Calendar"
-- Gestione cancellazioni (con policy: es. cancellazione entro 24h)
-- Lista clienti con storico
-- Export CSV mensile
-- Test su vari dispositivi e browser
-```
+- [ ] Acquistare dominio `.it` o `.com` (Aruba / Namecheap)
+- [ ] Creare account **Brevo** (gratis, piano free 300 email/giorno)
+- [ ] Configurare DNS nel registrar in un'unica sessione:
+  - Record A/CNAME → GitHub Pages (attiva dominio custom)
+  - Record SPF + DKIM → Brevo (verifica dominio mittente email)
+- [ ] Impostare dominio custom in GitHub Pages → SSL automatico Let's Encrypt
+- [ ] **Aggiornare tutti i path `/Palestra/` → `/`** nel codice (sw.js, manifest.json, HTML × 6, booking.js, login.html OAuth redirect)
+- [ ] Aggiornare URL redirect OAuth in pannello Supabase → Authentication → URL Configuration
 
 ---
 
-### Fase 4 — Funzionalità avanzate (futuro)
+### Fase 2 — Migrazione Supabase
 
-```
-Obiettivo: automatizzare ulteriormente, crescere
+- [ ] **Schema DB corretto** — ridisegnare con pattern ledger per i crediti:
+  - Tabella `credit_transactions(id, user_id, amount, type, booking_ref, note, created_at)`
+  - Saldo calcolato sempre come `SUM(amount)` — niente campo `balance` da sincronizzare
+  - Tabella `manual_debts` + `booking_audit` per annullamenti
+- [ ] Sostituire `BookingStorage`, `CreditStorage`, `ManualDebtStorage` con chiamate Supabase API
+- [ ] Aggiungere `async/await` a tutti i caller (già strutturati per farlo)
+- [ ] Configurare RLS (Row Level Security) — ogni utente vede solo i propri dati
+- [ ] **Credenziali admin sicure**: Supabase Auth con ruolo `admin`, rimuovere `admin123`
+- [ ] **Email recupero password**: Supabase Auth la gestisce nativamente (bcrypt + salt automatici)
+- [ ] Collegare **Brevo come SMTP** in Supabase → Settings → Auth → SMTP (2 min, dominio già verificato)
+- [ ] Sostituire polling (ogni 3s) con **Supabase Realtime** subscriptions
+- [ ] Test completo end-to-end su dati reali
 
-- WhatsApp automatico (whatsapp-web.js su Railway)
-- Gestione abbonamenti / pacchetti
-- Pagamenti online (Stripe)
-- PWA installabile
-- App mobile (React Native / Flutter)
-```
+---
+
+### Fase 3 — Notifiche email automatiche
+
+- [ ] Supabase Edge Function schedulata (cron) — gira ogni sera alle 20:00
+- [ ] Legge tutte le prenotazioni del giorno dopo da PostgreSQL
+- [ ] Invia email promemoria via Brevo per ogni prenotazione trovata
+- [ ] Email di conferma immediata alla prenotazione (trigger su INSERT)
+
+---
+
+### Fase 4 — Funzionalità future
+
+- [ ] Upload foto certificato medico (Supabase Storage)
+- [ ] Notifiche WhatsApp (whatsapp-web.js su Railway)
+- [ ] Gestione abbonamenti / pacchetti lezioni
+- [ ] Pagamenti online (Stripe)
 
 ---
 
