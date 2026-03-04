@@ -1,6 +1,6 @@
 # TB Training — Diario di Sviluppo & Roadmap
 
-> Documento aggiornato al 04/03/2026 (sessione 11)
+> Documento aggiornato al 04/03/2026 (sessione 12)
 > Prototipo: sistema di prenotazione palestra, frontend-only con localStorage
 > Supabase CLI installato, schema SQL definito, accesso dati centralizzato
 > Supabase cloud attivo (tabelle create), Google OAuth funzionante, numeri normalizzati E.164
@@ -845,6 +845,31 @@ Libreria Canvas custom, nessuna dipendenza esterna.
 - **Root cause:** la funzione gestiva solo il caso di sovrapagamento (`creditDelta > 0`) ma non il pagamento esatto (`creditDelta = 0`) né il pagamento parziale
 - **Fix:** aggiunta branch `else` che chiama `CreditStorage.addCredit(..., 0, 'Carta ricevuto', amountPaid, ...)` con `amount=0` e `displayAmount=amountPaid` — coerente con quanto già faceva `saveBookingEdit()` dalla tab Clienti
 - **Fix cache:** bump `admin.js?v=7` → `v=8` in `admin.html` per forzare il reload del browser (il fix era in produzione ma il browser serviva la versione cachata)
+
+---
+
+### 4.27 Fix Registro: rimborsi e storico annullamenti (sessione 12, mar 2026)
+
+**Problema:** il 🔄 Rimborso non appariva nel Registro dopo l'annullamento di una prenotazione pagata.
+
+**Root cause (tre livelli):**
+1. **SW cache stale:** `admin.js?v=7/8` ancora in cache durante l'annullamento → il vecchio codice creava i rimborsi con `hiddenRefund=true`, rendendoli invisibili
+2. **Filtro `hiddenRefund` in `buildRegistroEntries`:** il Registro filtrava le entry con `hiddenRefund=true`, nascondendo i rimborsi storici salvati col vecchio codice
+3. **`booking_paid` assente per prenotazioni annullate:** dopo l'annullamento `booking.paid = false` e `booking.paidAt = null`, quindi `buildRegistroEntries` non generava la riga ✅ Pagamento
+
+**Fix applicati:**
+
+- **SW cache:** bump `palestra-v4` → `palestra-v5` per forzare il reload di tutti i file JS
+- **`buildRegistroEntries` — `booking_paid` per annullati:** usa `cancelledPaidAt` / `cancelledPaymentMethod` (salvati da `deleteBooking`) per ricostruire la riga ✅ Pagamento anche dopo l'annullamento; analogamente `booking_created` mostra `cancelledPaymentMethod` e `bookingPaid=true` se era pagata prima della cancellazione
+- **Rimosso filtro `hiddenRefund` da `buildRegistroEntries`:** il Registro è la vista admin completa e deve mostrare tutti i rimborsi, inclusi quelli storici salvati con `hiddenRefund=true`; il filtro rimane solo nel pannello storico transazioni del singolo cliente
+
+**Risultato:** per ogni prenotazione pagata e poi annullata il Registro mostra correttamente tutte e 4 le righe in sequenza:
+
+```
+📅 Prenotazione   →  ✅ Pagamento  →  ❌ Annullamento  →  🔄 Rimborso
+```
+
+**File modificati:** `js/admin.js` (v=10), `admin.html`, `sw.js`
 
 ---
 ### 4.12 Notifiche (pianificate, non ancora implementate)
