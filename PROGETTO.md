@@ -1,6 +1,6 @@
 # TB Training — Diario di Sviluppo & Roadmap
 
-> Documento aggiornato al 04/03/2026 (sessione 15)
+> Documento aggiornato al 07/03/2026 (sessione 17)
 > Prototipo: sistema di prenotazione palestra, frontend-only con localStorage
 > Supabase CLI installato, schema SQL definito, accesso dati centralizzato
 > Supabase cloud attivo (tabelle create), Google OAuth funzionante, numeri normalizzati E.164
@@ -967,6 +967,129 @@ Ogni cliente ha un **bonus giornaliero** (0 o 1) che permette di annullare una p
 **Nota Supabase:** `DebtThresholdStorage` → tabella `settings(key TEXT PRIMARY KEY, value TEXT)` con `key = 'debt_threshold'`. `getUnpaidPastDebt` → query SQL su `bookings` con filtro `paid = false` e `ended_at < now()`.
 
 **File modificati:** `js/data.js` (v7), `js/admin.js` (v11), `js/booking.js` (v5), `admin.html`, `css/admin.css` (v7), più bump v7 `data.js` in tutti gli altri HTML
+
+---
+
+### 4.31 Layout mobile prenotazioni, impostazioni certificato e filtri clienti (sessione 16, mar 2026)
+
+#### Layout mobile "Le mie prenotazioni"
+
+**Problema:** su mobile la card prenotazione aveva badge e bottone affiancati in riga, e l'hint grigio a fianco del bottone invece che sotto.
+
+**Fix layout card su mobile (`css/prenotazioni.css`):**
+- `.preno-card`: aggiunto `flex-wrap: wrap; align-items: flex-start` → la card si divide in riga destra/sinistra con eventuale hint a piena larghezza sotto
+- `.preno-card-left`: `flex: 1; min-width: 0`
+- `.preno-card-right`: ripristinato `flex-direction: column; max-width: 130px` → badge in alto a destra, bottone sotto
+- `.preno-badge`: `white-space: normal; text-align: center; padding: 0.3rem` → il testo lungi (es. "Pagata con Contanti") va a capo e si centra
+- `.preno-cancel-btn`: stessi override per il wrap
+- `.preno-card-date`: `font-size: 0.82rem`
+
+**Rimozione hint grigi (preno-bonus-hint):**
+- Rimossa la classe `.preno-bonus-hint` da `prenotazioni.css` e `admin.css`
+- In `buildCard()` (`prenotazioni.html`): `cancelHint` separato da `cancelBtn` (era un div annidato), poi eliminato del tutto — i commenti "Non annullabile... hai 1 bonus" e "Rimborso del 50%..." sono stati rimossi su richiesta
+
+#### Warning certificato medico — tutto cliccabile
+
+- Rimosso lo `<span>(qui)</span>` dal warning "Imposta scadenza Cert. Medico"
+- Tutti e tre i warning (non impostato, scaduto, in scadenza) sono ora interi `<div>` cliccabili con classe `preno-cert-clickable`
+- **Se cert non modificabile:** click → `showToast('Porta a Thomas il certificato medico', 'error')` invece di aprire il modale
+
+#### Impostazioni admin — Certificato medico modificabile
+
+Nuova sezione in **Admin → Impostazioni** per controllare se i clienti possono modificare la data di scadenza del proprio certificato:
+
+- **`CertEditableStorage`** in `data.js`: `get()` (default `true`) / `set(val)`; chiave `gym_cert_scadenza_editable`
+- **Toggle switch CSS** (`.settings-toggle-wrap`, `.settings-toggle-track`, `.settings-toggle-thumb`) in `admin.css`
+- **`renderCertEditableUI()`** e **`saveCertEditable(val)`** in `admin.js`, chiamati da `renderSettingsTab()`
+- **`prenotazioni.html`**: `openEditProfileModal()` imposta `certField.disabled = !CertEditableStorage.get()`
+
+#### Impostazioni admin — Blocco prenotazioni per certificato
+
+Nuova sezione in **Admin → Impostazioni** con due toggle indipendenti:
+
+| Toggle | Comportamento se attivo |
+|---|---|
+| Certificato scaduto | Blocca la prenotazione se `certScad < today` |
+| Certificato non impostato | Blocca la prenotazione se `certScad` è vuoto |
+
+- **`CertBookingStorage`** in `data.js`: `getBlockIfExpired()` / `getBlockIfNotSet()` / `setBlockIfExpired(val)` / `setBlockIfNotSet(val)`; chiavi `gym_cert_block_expired` e `gym_cert_block_not_set`
+- **`renderCertBlockUI()`**, **`saveCertBlockExpired(val)`**, **`saveCertBlockNotSet(val)`** in `admin.js`
+- **`booking.js`**: check dopo il debito threshold — `getUserByEmail(formData.email)` + confronto `certScad < today`; toast di errore e `return` se bloccato
+
+#### Tab Clienti — filtro e utenti senza prenotazioni
+
+**Filtro "🏥 Senza certificato":**
+- Bottone toggle nella barra di ricerca clienti (`.clients-cert-filter-btn`)
+- Stato `clientCertFilter` (boolean) in `admin.js`
+- `clientHasCertIssue(client)`: cert non impostato o scaduto → `true`
+- `renderClientsTab()` applica il filtro con `filtered.filter(clientHasCertIssue)` quando attivo
+- Funziona in combinazione con la ricerca testuale
+
+**Utenti registrati senza prenotazioni:**
+- `getAllClients()` itera ora anche `UserStorage.getAll()` dopo aver costruito la mappa dalle prenotazioni
+- Gli account registrati (`gym_users`) senza prenotazioni appaiono come card con 0 prenotazioni
+
+**Stile ricerca clienti allineato a Pagamenti:**
+- `border: 2px solid #e0e0e0`, `font-size: 1rem`, focus `border-color: #ff6b6b`
+
+**File modificati:** `js/data.js` (v13), `js/admin.js` (v18), `js/booking.js` (v6), `css/admin.css` (v11), `admin.html`, `prenotazioni.html`, `css/prenotazioni.css` (v7), bump `data.js` in tutti gli HTML
+
+---
+
+### 4.32 Sicurezza, XSS fix, RLS Supabase e password SHA-256 (sessione 17, mar 2026)
+
+#### Scansione sicurezza pre-migrazione
+
+Analisi completa del progetto prima della migrazione a Supabase. Problemi identificati e risolti:
+
+1. **XSS** — dati utente interpolati in `innerHTML` senza escaping
+2. **Link admin statico** — "Amministrazione" visibile a tutti anche prima del login
+3. **Password admin in chiaro** — `admin123` hardcoded nel sorgente pubblico su GitHub
+4. **Bug stat** — confronto prenotazioni usava campione filtrato per ricavo invece che per conteggio
+
+#### XSS fix — `_escHtml()` centralizzata
+
+- Aggiunta `_escHtml(str)` in `js/ui.js` (v1→v2): escape di `&`, `<`, `>`, `"` per uso in `innerHTML`
+- Rimossa la copia locale di `_escHtml` che era solo in `admin.js` (registro)
+- **`js/admin.js`**: applicato `_escHtml()` sistematicamente a tutti i dati utente interpolati in innerHTML: tab analytics, card partecipanti, schedule manager client picker, storico crediti, card debitori, storico transazioni, tab clienti, valori degli `input[value]`
+- **`js/booking.js`** (v6→v7): `_escHtml(booking.name)` in `showConfirmation()`
+- Aggiornato `ui.js?v=1` → `ui.js?v=2` in tutti gli HTML
+
+#### Link Amministrazione — visibilità dinamica (poi ripristinato statico)
+
+- **Prima modifica:** rimosso il link statico `<li><a href="admin.html">Amministrazione</a></li>` da tutti gli HTML pubblici; aggiunto in `auth.js` (`updateNavAuth()`) nel ramo `isAdmin` tramite `_injectNavLinkLast()` — visibile solo dopo login admin
+- **Ripristinato su richiesta:** Thomas preferisce il link sempre visibile durante la fase di sviluppo/test → link statico rimesso in navbar desktop e sidebar di tutti gli HTML (index, chi-sono, dove-sono, login, prenotazioni)
+
+#### Password admin SHA-256
+
+Sostituito il controllo in chiaro `password === 'admin123'` con verifica SHA-256 via Web Crypto API. La password non è più leggibile dal sorgente pubblico su GitHub.
+
+- **Salt:** `tb-admin-2026`
+- **Hash SHA-256:** `036f86f46401f7c2c915c266c56db12210c784961d783c8efa32532fa7fb4fe5`
+- **`js/admin.js`** (v19→v20): rimosso `ADMIN_PASSWORD`; aggiunta `async _checkAdminPassword(password)` con `crypto.subtle.digest('SHA-256', ...)`; `setupLogin()` diventa `async`
+- **`login.html`**: stesso pattern async per il form `adminLoginForm`
+
+#### Fix bug statistiche admin
+
+**Problema:** il confronto "prenotazioni periodo precedente" usava `prevRevBookings` (campione filtrato per ricavo: escludeva `lezione-gratuita`) anche per il conteggio prenotazioni, producendo un delta errato.
+
+**Fix in `js/admin.js`:** aggiunto `prevAllBookings` separato (esclude solo `cancelled`, come `filteredBookings`) usato esclusivamente per `calcChange` sul contatore prenotazioni. `prevRevBookings` resta per il confronto ricavo.
+
+#### File RLS Supabase
+
+Creato `supabase-rls.sql` con le policy Row Level Security per tutte le 7 tabelle del progetto:
+
+| Tabella | Policy |
+|---|---|
+| `bookings` | SELECT/INSERT/UPDATE solo per `user_id = auth.uid()` |
+| `users` | SELECT/INSERT/UPDATE solo per `id = auth.uid()` |
+| `credits` | SELECT solo per `user_id = auth.uid()`; write riservato a service_role |
+| `schedule_overrides` | SELECT pubblico (anon + authenticated); write solo service_role |
+| `manual_debts` | SELECT solo per `user_id = auth.uid()`; write solo service_role |
+| `push_subscriptions` | SELECT/INSERT/DELETE per `user_id = auth.uid()` |
+| `settings` | SELECT pubblico; write solo service_role |
+
+**File modificati:** `js/ui.js` (v2), `js/admin.js` (v20), `js/booking.js` (v7), `login.html`, `admin.html`, `index.html`, `chi-sono.html`, `dove-sono.html`, `prenotazioni.html`, `supabase-rls.sql` (nuovo)
 
 ---
 
